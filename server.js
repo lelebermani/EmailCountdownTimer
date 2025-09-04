@@ -4,6 +4,7 @@ import utc from "dayjs/plugin/utc.js";
 import timezone from "dayjs/plugin/timezone.js";
 import { Resvg } from "@resvg/resvg-js";
 import GIFEncoder from "gif-encoder-2";
+import { PNG } from "pngjs";
 
 dayjs.extend(utc);
 dayjs.extend(timezone);
@@ -18,7 +19,7 @@ function getParams(q) {
   const bg = `#${(q.bg || "FFFFFF").replace("#", "")}`;
   const fg = `#${(q.fg || "111827").replace("#", "")}`;
   const accent = `#${(q.accent || "6366F1").replace("#", "")}`;
-  const fps = Math.max(1, Math.min(10, parseInt(q.fps || "2", 10))); // 1–10fps
+  const fps = Math.max(1, Math.min(10, parseInt(q.fps || "2", 10))); // 1–10 fps
   const font = q.font || "Arial, Helvetica, sans-serif";
 
   let target = to ? dayjs.tz(to, tz) : null;
@@ -69,26 +70,28 @@ function svgMarkup({ width, height, bg, fg, accent, font }, dhms, blink) {
 
 async function renderGIF(params) {
   const total = Math.max(0, params.target.diff(dayjs(), "second"));
-  const frames = Math.min(60, params.fps * 6); // ~6 sec animation
-  const delay = 1000 / params.fps; // ms/frame
+  const frames = Math.min(60, params.fps * 6); // ~6s animation
+  const delay = Math.round(1000 / params.fps); // ms per frame
 
-  const enc = new GIFEncoder(params.width, params.height);
-  enc.start();
-  enc.setRepeat(0); // loop forever
-  enc.setDelay(delay);
-  enc.setQuality(10);
+  const encoder = new GIFEncoder(params.width, params.height);
+  encoder.start();
+  encoder.setRepeat(0);
+  encoder.setDelay(delay);
+  encoder.setQuality(10);
 
   for (let i = 0; i < frames; i++) {
     const remain = total - i;
     const dhms = splitDHMS(remain);
-    const blink = (i % params.fps) < params.fps / 2; // blink at ~1Hz
+    const blink = (i % params.fps) < params.fps / 2;
+
     const svg = svgMarkup(params, dhms, blink);
-    const png = new Resvg(svg).render().asPng();
-    enc.addFrame(png);
+    const pngBuffer = new Resvg(svg).render().asPng();
+    const { data } = PNG.sync.read(pngBuffer); // <-- RGBA pixels
+    encoder.addFrame(data);
   }
 
-  enc.finish();
-  return Buffer.from(enc.out.getData());
+  encoder.finish();
+  return Buffer.from(encoder.out.getData());
 }
 
 app.get(["/countdown.gif", "/gif"], async (req, res) => {
