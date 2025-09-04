@@ -12,25 +12,28 @@ dayjs.extend(timezone);
 const app = express();
 
 function getParams(q) {
-  const to = q.to || "";
-  const tz = q.tz || "UTC";
+  const to   = q.to || "";
+  const tz   = q.tz || "UTC";
 
-  // Default smaller size to keep 2-minute GIFs lightweight
-  const width  = Math.max(360, Math.min(1200, parseInt(q.w || "540", 10)));
-  const height = Math.max(120, Math.min(400,  parseInt(q.h || "160", 10)));
+  // Defaults tuned for email
+  const width  = Math.max(300, Math.min(1200, parseInt(q.w || "540", 10)));
+  const height = Math.max(100, Math.min(400,  parseInt(q.h || "160", 10)));
 
-  const bg     = `#${(q.bg || "FFFFFF").replace("#", "")}`;
-  const fg     = `#${(q.fg || "111827").replace("#", "")}`;
-  const accent = `#${(q.accent || "D9D6FE").replace("#", "")}`;
-  const font   = q.font || "Arial, Helvetica, sans-serif";
+  const bg     = `#${(q.bg || "FFFFFF").replace("#","")}`;
+  const fg     = `#${(q.fg || "111827").replace("#","")}`;
+  const accent = `#${(q.accent || "D9D6FE").replace("#","")}`;
+  const font   = q.font || "monospace, Menlo, Consolas, 'Liberation Mono', Arial";
 
-  // Duration in seconds (cap 120 to avoid timeouts on free tiers)
-  const dur = Math.max(30, Math.min(parseInt(q.dur || "120", 10), 120)); // 30–120s
+  // duration in seconds; cap to 120 to avoid Render timeouts
+  const dur = Math.max(30, Math.min(parseInt(q.dur || "120", 10), 120));
+
+  // GIF quality: higher = more compression (smaller file), default 25
+  const qfactor = Math.max(1, Math.min(parseInt(q.q || "25", 10), 40));
 
   let target = to ? dayjs.tz(to, tz) : null;
   if (!target || !target.isValid()) target = dayjs().tz(tz).add(1, "day");
 
-  return { target, tz, width, height, bg, fg, accent, font, dur };
+  return { target, tz, width, height, bg, fg, accent, font, dur, qfactor };
 }
 
 function splitDHMS(totalSeconds) {
@@ -44,59 +47,86 @@ function splitDHMS(totalSeconds) {
 }
 const pad2 = (n) => String(n).padStart(2, "0");
 
-function svgMarkup({ width, height, bg, fg, accent, font }, dhms) {
+function svgMarkupGrid(p, dhms) {
+  const { width, height, bg, fg, accent, font } = p;
   const { days, hours, minutes, seconds } = dhms;
-  const big   = Math.floor(height * 0.50);
-  const small = Math.floor(height * 0.18);
+
+  // Grid layout: M margin, 4 equal cells
+  const M = Math.max(10, Math.floor(width * 0.06));
+  const usable = width - M * 2;
+  const cells = 4;
+  const cellW = usable / cells;
+
+  // Digit font scales by height and cell width (so 2 vs 3 digits won’t overflow)
+  const numFont = Math.floor(Math.min(height * 0.52, cellW * 0.65));
+  const labFont = Math.floor(Math.max(10, height * 0.18));
+
+  // Centers of each cell
+  const cx = Array.from({ length: cells }, (_, i) => Math.round(M + cellW * i + cellW / 2));
+  const baseY  = Math.round(height * 0.60);
+  const labelY = Math.round(height * 0.92);
+
+  // Colon positions between cells
+  const c12 = Math.round(M + cellW * 1);
+  const c23 = Math.round(M + cellW * 2);
+  const c34 = Math.round(M + cellW * 3);
 
   return `
 <svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}">
+  <style>
+    text{ font-family:${font}; fill:${fg}; }
+    .num{ font-weight:700; font-size:${numFont}px; text-anchor:middle; }
+    .lab{ font-weight:500; font-size:${labFont}px; text-anchor:middle; }
+  </style>
   <rect width="100%" height="100%" fill="${bg}"/>
-  <g font-family="${font}" text-anchor="middle" fill="${fg}">
-    <g font-weight="700" font-size="${big}">
-      <text x="${width*0.14}" y="${height*0.60}">${String(days).padStart(2,"0")}</text>
-      <text x="${width*0.27}" y="${height*0.60}" fill="${accent}">:</text>
-      <text x="${width*0.40}" y="${height*0.60}">${pad2(hours)}</text>
-      <text x="${width*0.53}" y="${height*0.60}" fill="${accent}">:</text>
-      <text x="${width*0.66}" y="${height*0.60}">${pad2(minutes)}</text>
-      <text x="${width*0.79}" y="${height*0.60}" fill="${accent}">:</text>
-      <text x="${width*0.92}" y="${height*0.60}">${pad2(seconds)}</text>
-    </g>
-    <g font-size="${small}" font-weight="500">
-      <text x="${width*0.14}" y="${height*0.92}">DAYS</text>
-      <text x="${width*0.40}" y="${height*0.92}">HOURS</text>
-      <text x="${width*0.66}" y="${height*0.92}">MINUTES</text>
-      <text x="${width*0.92}" y="${height*0.92}">SECONDS</text>
-    </g>
+
+  <!-- Numbers -->
+  <g class="num">
+    <text x="${cx[0]}" y="${baseY}">${String(days).padStart(2,"0")}</text>
+    <text x="${cx[1]}" y="${baseY}">${pad2(hours)}</text>
+    <text x="${cx[2]}" y="${baseY}">${pad2(minutes)}</text>
+    <text x="${cx[3]}" y="${baseY}">${pad2(seconds)}</text>
+  </g>
+
+  <!-- Colons (no blink) -->
+  <g fill="${accent}" font-weight="700" font-size="${Math.floor(numFont * 0.9)}" text-anchor="middle">
+    <text x="${c12}" y="${baseY}">:</text>
+    <text x="${c23}" y="${baseY}">:</text>
+    <text x="${c34}" y="${baseY}">:</text>
+  </g>
+
+  <!-- Labels -->
+  <g class="lab">
+    <text x="${cx[0]}" y="${labelY}">DAYS</text>
+    <text x="${cx[1]}" y="${labelY}">HOURS</text>
+    <text x="${cx[2]}" y="${labelY}">MINUTES</text>
+    <text x="${cx[3]}" y="${labelY}">SECONDS</text>
   </g>
 </svg>`;
 }
 
-async function renderGIF(params) {
-  // 1 fps: one frame per real second
-  const frames = params.dur;   // default 120s
-  const delay  = 1000;         // ms per frame (exactly 1 second)
+async function renderGIF(p) {
+  // 1 fps for real-time ticking
+  const frames = p.dur;       // seconds
+  const delay  = 1000;        // ms per frame
+  const total  = Math.max(0, p.target.diff(dayjs(), "second"));
 
-  const total = Math.max(0, params.target.diff(dayjs(), "second"));
-
-  const encoder = new GIFEncoder(params.width, params.height);
-  encoder.start();
-  encoder.setRepeat(0);   // loop forever after 2 minutes
-  encoder.setDelay(delay);
-  encoder.setQuality(10);
+  const enc = new GIFEncoder(p.width, p.height);
+  enc.start();
+  enc.setRepeat(0);
+  enc.setDelay(delay);
+  enc.setQuality(p.qfactor);  // higher = smaller/faster
 
   for (let i = 0; i < frames; i++) {
-    const remain = total - i;       // tick down by 1s each frame
-    const dhms   = splitDHMS(remain);
-
-    const svg        = svgMarkup(params, dhms); // no blinking colon
-    const pngBuffer  = new Resvg(svg, { fitTo: { mode: "width", value: params.width }}).render().asPng();
-    const { data }   = PNG.sync.read(pngBuffer); // RGBA pixels
-    encoder.addFrame(data);
+    const remain = total - i;
+    const dhms = splitDHMS(remain);
+    const svg = svgMarkupGrid(p, dhms);
+    const png = new Resvg(svg, { fitTo: { mode: "width", value: p.width } }).render().asPng();
+    const { data } = PNG.sync.read(png); // RGBA
+    enc.addFrame(data);
   }
-
-  encoder.finish();
-  return Buffer.from(encoder.out.getData());
+  enc.finish();
+  return Buffer.from(enc.out.getData());
 }
 
 app.get(["/countdown.gif", "/gif"], async (req, res) => {
