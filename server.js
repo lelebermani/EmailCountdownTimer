@@ -70,8 +70,8 @@ function svgMarkup({ width, height, bg, fg, accent, font }, dhms, blink) {
 
 async function renderGIF(params) {
   const total = Math.max(0, params.target.diff(dayjs(), "second"));
-  const frames = Math.min(60, params.fps * 6); // ~6s animation
-  const delay = Math.round(1000 / params.fps); // ms per frame
+  const frames = 180; //3min animation
+  const delay = 1000; //1sec each frame
 
   const encoder = new GIFEncoder(params.width, params.height);
   encoder.start();
@@ -80,7 +80,7 @@ async function renderGIF(params) {
   encoder.setQuality(10);
 
   for (let i = 0; i < frames; i++) {
-    const remain = total - i;
+    const remain = total - i;   // subtract 1 per frame
     const dhms = splitDHMS(remain);
     const blink = (i % params.fps) < params.fps / 2;
 
