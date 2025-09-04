@@ -14,18 +14,23 @@ const app = express();
 function getParams(q) {
   const to = q.to || "";
   const tz = q.tz || "UTC";
-  const width = Math.max(400, Math.min(2000, parseInt(q.w || "800", 10)));
-  const height = Math.max(120, Math.min(800, parseInt(q.h || "200", 10)));
-  const bg = `#${(q.bg || "FFFFFF").replace("#", "")}`;
-  const fg = `#${(q.fg || "111827").replace("#", "")}`;
-  const accent = `#${(q.accent || "6366F1").replace("#", "")}`;
-  const fps = Math.max(1, Math.min(10, parseInt(q.fps || "2", 10))); // 1–10 fps
-  const font = q.font || "Arial, Helvetica, sans-serif";
+
+  // Default smaller size to keep 2-minute GIFs lightweight
+  const width  = Math.max(360, Math.min(1200, parseInt(q.w || "540", 10)));
+  const height = Math.max(120, Math.min(400,  parseInt(q.h || "160", 10)));
+
+  const bg     = `#${(q.bg || "FFFFFF").replace("#", "")}`;
+  const fg     = `#${(q.fg || "111827").replace("#", "")}`;
+  const accent = `#${(q.accent || "D9D6FE").replace("#", "")}`;
+  const font   = q.font || "Arial, Helvetica, sans-serif";
+
+  // Duration in seconds (cap 120 to avoid timeouts on free tiers)
+  const dur = Math.max(30, Math.min(parseInt(q.dur || "120", 10), 120)); // 30–120s
 
   let target = to ? dayjs.tz(to, tz) : null;
   if (!target || !target.isValid()) target = dayjs().tz(tz).add(1, "day");
 
-  return { target, tz, width, height, bg, fg, accent, fps, font };
+  return { target, tz, width, height, bg, fg, accent, font, dur };
 }
 
 function splitDHMS(totalSeconds) {
@@ -39,54 +44,54 @@ function splitDHMS(totalSeconds) {
 }
 const pad2 = (n) => String(n).padStart(2, "0");
 
-function svgMarkup({ width, height, bg, fg, accent, font }, dhms, blink) {
+function svgMarkup({ width, height, bg, fg, accent, font }, dhms) {
   const { days, hours, minutes, seconds } = dhms;
-  const big = Math.floor(height * 0.48);
-  const small = Math.floor(height * 0.16);
-  const sepOpacity = blink ? 0.25 : 1;
+  const big   = Math.floor(height * 0.50);
+  const small = Math.floor(height * 0.18);
 
   return `
 <svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}">
   <rect width="100%" height="100%" fill="${bg}"/>
   <g font-family="${font}" text-anchor="middle" fill="${fg}">
     <g font-weight="700" font-size="${big}">
-      <text x="${width*0.14}" y="${height*0.58}">${String(days).padStart(2,"0")}</text>
-      <text x="${width*0.27}" y="${height*0.58}" fill="${accent}" opacity="${sepOpacity}">:</text>
-      <text x="${width*0.40}" y="${height*0.58}">${pad2(hours)}</text>
-      <text x="${width*0.53}" y="${height*0.58}" fill="${accent}" opacity="${sepOpacity}">:</text>
-      <text x="${width*0.66}" y="${height*0.58}">${pad2(minutes)}</text>
-      <text x="${width*0.79}" y="${height*0.58}" fill="${accent}" opacity="${sepOpacity}">:</text>
-      <text x="${width*0.92}" y="${height*0.58}">${pad2(seconds)}</text>
+      <text x="${width*0.14}" y="${height*0.60}">${String(days).padStart(2,"0")}</text>
+      <text x="${width*0.27}" y="${height*0.60}" fill="${accent}">:</text>
+      <text x="${width*0.40}" y="${height*0.60}">${pad2(hours)}</text>
+      <text x="${width*0.53}" y="${height*0.60}" fill="${accent}">:</text>
+      <text x="${width*0.66}" y="${height*0.60}">${pad2(minutes)}</text>
+      <text x="${width*0.79}" y="${height*0.60}" fill="${accent}">:</text>
+      <text x="${width*0.92}" y="${height*0.60}">${pad2(seconds)}</text>
     </g>
     <g font-size="${small}" font-weight="500">
-      <text x="${width*0.14}" y="${height*0.90}">DAYS</text>
-      <text x="${width*0.40}" y="${height*0.90}">HOURS</text>
-      <text x="${width*0.66}" y="${height*0.90}">MINUTES</text>
-      <text x="${width*0.92}" y="${height*0.90}">SECONDS</text>
+      <text x="${width*0.14}" y="${height*0.92}">DAYS</text>
+      <text x="${width*0.40}" y="${height*0.92}">HOURS</text>
+      <text x="${width*0.66}" y="${height*0.92}">MINUTES</text>
+      <text x="${width*0.92}" y="${height*0.92}">SECONDS</text>
     </g>
   </g>
 </svg>`;
 }
 
 async function renderGIF(params) {
+  // 1 fps: one frame per real second
+  const frames = params.dur;   // default 120s
+  const delay  = 1000;         // ms per frame (exactly 1 second)
+
   const total = Math.max(0, params.target.diff(dayjs(), "second"));
-  const frames = 180; //3min animation
-  const delay = 1000; //1sec each frame
 
   const encoder = new GIFEncoder(params.width, params.height);
   encoder.start();
-  encoder.setRepeat(0);
+  encoder.setRepeat(0);   // loop forever after 2 minutes
   encoder.setDelay(delay);
   encoder.setQuality(10);
 
   for (let i = 0; i < frames; i++) {
-    const remain = total - i;   // subtract 1 per frame
-    const dhms = splitDHMS(remain);
-    const blink = (i % params.fps) < params.fps / 2;
+    const remain = total - i;       // tick down by 1s each frame
+    const dhms   = splitDHMS(remain);
 
-    const svg = svgMarkup(params, dhms, blink);
-    const pngBuffer = new Resvg(svg).render().asPng();
-    const { data } = PNG.sync.read(pngBuffer); // <-- RGBA pixels
+    const svg        = svgMarkup(params, dhms); // no blinking colon
+    const pngBuffer  = new Resvg(svg, { fitTo: { mode: "width", value: params.width }}).render().asPng();
+    const { data }   = PNG.sync.read(pngBuffer); // RGBA pixels
     encoder.addFrame(data);
   }
 
@@ -102,7 +107,7 @@ app.get(["/countdown.gif", "/gif"], async (req, res) => {
     res.set("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");
     res.send(buf);
   } catch (e) {
-    console.error(e);
+    console.error("GIF error:", e);
     res.status(500).send("GIF error");
   }
 });
