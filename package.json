@@ -1,0 +1,16 @@
+{
+  "name": "email-countdown",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "@resvg/resvg-js": "^2.6.2",
+    "dayjs": "^1.11.11",
+    "dayjs-plugin-utc": "^0.1.2",
+    "dayjs-plugin-timezone": "^0.1.2",
+    "express": "^4.19.2",
+    "gif-encoder-2": "^1.0.5"
+  }
+}
